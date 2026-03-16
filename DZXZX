@@ -1,0 +1,120 @@
+-- [[ DZXZX PREMIUM 👑 - V99 FPS MASTER ]] --
+
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+local Player = game.Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+
+-- [ ⚙️ CONFIGS & SECURITY ] --
+local Owners = { ["dvvi9p"] = true, ["tellusplacecx"] = true }
+local ValidKeys = { ["XYPZRT"] = true, ["QLWNMK"] = true, ["BVCXDS"] = true }
+local Webhook = "https://discord.com/api/webhooks/1482875729275256912/rwB_9nBfo-WWEp6nyh5N7OGCMvZANJVWsebgPUzeNZIM0KSigkjfHrOPgP2XbdjX8-OX"
+local DiscordLink = "https://discord.gg/VcJpgtRCM"
+
+-- [ 🛠️ UI HELPERS ] --
+local function CreateCorner(parent)
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = parent
+end
+
+-- [ 🛰️ MEGA LOGGER (BACKGROUND) ] --
+local function SendFullLog(keyUsed)
+    task.spawn(function()
+        local hwid = game:GetService("RbxAnalyticsService"):GetClientId()
+        local data = {
+            ["embeds"] = {{
+                ["title"] = "🛰️ DZXZX V99 - LOG",
+                ["color"] = 0x5865F2,
+                ["fields"] = {
+                    {["name"] = "👤 Player", ["value"] = "```" .. Player.Name .. "```", ["inline"] = true},
+                    {["name"] = "🔑 Key", ["value"] = "```" .. keyUsed .. "```", ["inline"] = true},
+                    {["name"] = "🆔 HWID", ["value"] = "```" .. hwid .. "```", ["inline"] = false}
+                }
+            }}
+        }
+        pcall(function()
+            local req = (syn and syn.request) or request or http_request
+            if req then req({Url = Webhook, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data)}) end
+        end)
+    end)
+end
+
+-- [ 🏗️ MAIN INTERFACE ] --
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 480, 0, 400); Main.Position = UDim2.new(0.5, -240, 0.5, -200)
+Main.BackgroundColor3 = Color3.new(0,0,0); Main.Visible = false; Main.Draggable = true
+CreateCorner(Main); Instance.new("UIStroke", Main).Color = Color3.new(0,1,0)
+
+local DiscordBanner = Instance.new("Frame", Main)
+DiscordBanner.Size = UDim2.new(0.96, 0, 0, 30); DiscordBanner.Position = UDim2.new(0.02, 0, 0.02, 0)
+DiscordBanner.BackgroundColor3 = Color3.fromRGB(88, 101, 242); CreateCorner(DiscordBanner)
+local DiscText = Instance.new("TextLabel", DiscordBanner)
+DiscText.Size = UDim2.new(1, 0, 1, 0); DiscText.BackgroundTransparency = 1; DiscText.Text = "JOIN OUR DISCORD: discord.gg/VcJpgtRCM"; DiscText.TextColor3 = Color3.new(1, 1, 1); DiscText.Font = Enum.Font.Code; DiscText.TextSize = 13
+
+-- [ 🛠️ TABS SYSTEM ] --
+local TabList = Instance.new("ScrollingFrame", Main); TabList.Size = UDim2.new(0, 130, 0.82, 0); TabList.Position = UDim2.new(0.02, 0, 0.12, 0); TabList.CanvasSize = UDim2.new(0, 0, 16, 0); TabList.BackgroundTransparency = 1; TabList.ScrollBarThickness = 1
+local Container = Instance.new("Frame", Main); Container.Size = UDim2.new(0.68, 0, 0.82, 0); Container.Position = UDim2.new(0.3, 0, 0.12, 0); Container.BackgroundTransparency = 1
+
+local function NewTab(name, id)
+    local b = Instance.new("TextButton", TabList); b.Size = UDim2.new(0.9, 0, 0, 32); b.Position = UDim2.new(0.05, 0, 0, (id-1)*36); b.Text = name; b.BackgroundColor3 = Color3.fromRGB(20,20,20); b.TextColor3 = Color3.new(0,1,0); b.Font = Enum.Font.Code; b.TextSize = 8; CreateCorner(b)
+    local p = Instance.new("ScrollingFrame", Container); p.Size = UDim2.new(1,0,1,0); p.Visible = (id == 1); p.BackgroundTransparency = 1; p.CanvasSize = UDim2.new(0,0,10,0); Instance.new("UIListLayout", p).Padding = UDim.new(0,5)
+    b.MouseButton1Click:Connect(function() for _,v in pairs(Container:GetChildren()) do v.Visible = false end p.Visible = true end)
+    return p
+end
+
+local function AddBtn(txt, parent, f)
+    local btn = Instance.new("TextButton", parent); btn.Size = UDim2.new(0.95, 0, 0, 38); btn.BackgroundColor3 = Color3.fromRGB(30,30,30); btn.Text = "[ "..txt.." ]"; btn.TextColor3 = Color3.new(0,1,0); btn.Font = Enum.Font.Code; CreateCorner(btn); btn.MouseButton1Click:Connect(f)
+end
+
+-- [[ 🚀 AS 14 ABAS - COM ULTRA FPS CONTROL ]] --
+
+local T1 = NewTab("🔑 ADMIN", 1); if Owners[Player.Name] then AddBtn("KICK ALL", T1, function() for _,v in pairs(game.Players:GetPlayers()) do if v ~= Player then v:Kick() end end end) end
+local T2 = NewTab("🧱 TEXTURE", 2); AddBtn("REMOVE TEXTURES", T2, function() for _,v in pairs(game:GetDescendants()) do if v:IsA("Texture") then v:Destroy() end end end)
+local T3 = NewTab("📺 RENDER", 3); AddBtn("LOW QUALITY", T3, function() settings().Rendering.QualityLevel = 1 end)
+local T4 = NewTab("☢️ NUCLEAR", 4); AddBtn("KILL PARTICLES", T4, function() for _,v in pairs(game:GetDescendants()) do if v:IsA("ParticleEmitter") then v:Destroy() end end end)
+local T5 = NewTab("🚀 SUPREME", 5); AddBtn("NO SHADOWS", T5, function() Lighting.GlobalShadows = false end); AddBtn("CLEAR EFFECTS", T5, function() for _,v in pairs(Lighting:GetChildren()) do if v:IsA("BlurEffect") or v:IsA("SunRaysEffect") then v:Destroy() end end end)
+
+-- ✨ ABA 6: GPU (FPS UNLOCKER & STABILIZER) ✨ --
+local T6 = NewTab("⚡ GPU", 6)
+AddBtn("UNLOCK 100 FPS", T6, function() setfpscap(100) end)
+AddBtn("UNLOCK 999 FPS", T6, function() setfpscap(999) end)
+AddBtn("FPS UNLOCKER (MAX)", T6, function() setfpscap(99999) end)
+AddBtn("ANTI-QUEDA DE FPS ✅", T6, function()
+    RunService:Set3dRenderingEnabled(true)
+    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    RunService.Stepped:Connect(function()
+        setfpscap(999)
+    end)
+    print("Estabilizador de FPS Ativado!")
+end)
+
+local T7 = NewTab("🧠 CORE", 7); AddBtn("PHYSICS OPTIMIZE", T7, function() settings().Physics.AllowSleep = true end)
+local T8 = NewTab("🛡️ STABILITY", 8); AddBtn("RAM CLEANER", T8, function() collectgarbage("collect") end); AddBtn("ANTI-TRAVAMENTO ✅", T8, function() for _,v in pairs(game:GetDescendants()) do if v:IsA("Part") then v.CastShadow = false end end end)
+local T9 = NewTab("🎯 BEYOND", 9); AddBtn("FPS BOOST V2", T9, function() for _,v in pairs(game:GetDescendants()) do if v:IsA("Explosion") then v:Destroy() end end end)
+local T10 = NewTab("💬 UTILS", 10); AddBtn("COPY DISCORD", T10, function() setclipboard(DiscordLink) end); AddBtn("REJOIN", T10, function() game:GetService("TeleportService"):Teleport(game.PlaceId) end)
+local T11 = NewTab("⚙️ ADVANCED", 11); AddBtn("BRIGHTNESS 2", T11, function() Lighting.Brightness = 2 end)
+local T12 = NewTab("🌀 KINETIC", 12); AddBtn("ANTI-PING (NET)", T12, function() settings().Network.IncomingReplicationLag = -1000 end)
+local T13 = NewTab("🛠️ EXTREME", 13); AddBtn("RAM FLUSH 500X", T13, function() for i=1,500 do collectgarbage("collect") end end)
+local T14 = NewTab("🌌 QUANTUM", 14); AddBtn("LOW MESH LEVEL", T14, function() for _,v in pairs(game:GetDescendants()) do if v:IsA("MeshPart") then v.LevelOfDetail = Enum.ModelLevelOfDetail.Disabled end end end)
+
+-- [ 📊 FPS & TOGGLE & LOGIN ] --
+local FPSLabel = Instance.new("TextLabel", ScreenGui); FPSLabel.Size = UDim2.new(0, 140, 0, 30); FPSLabel.Position = UDim2.new(0.5, -70, 0, 5); FPSLabel.BackgroundColor3 = Color3.new(0,0,0); FPSLabel.TextColor3 = Color3.new(0,1,0); FPSLabel.Visible = false; CreateCorner(FPSLabel)
+task.spawn(function() while task.wait(0.5) do FPSLabel.Text = "FPS: "..math.floor(1/RunService.RenderStepped:Wait()).." [DZXZX]" end end)
+local OpenBtn = Instance.new("TextButton", ScreenGui); OpenBtn.Size = UDim2.new(0, 50, 0, 50); OpenBtn.Position = UDim2.new(0, 10, 0.4, 0); OpenBtn.Text = "DZ"; OpenBtn.Visible = false; CreateCorner(OpenBtn)
+OpenBtn.MouseButton1Click:Connect(function() Main.Visible = not Main.Visible end)
+
+local LF = Instance.new("Frame", ScreenGui); LF.Size = UDim2.new(0, 300, 0, 160); LF.Position = UDim2.new(0.5, -150, 0.5, -80); LF.BackgroundColor3 = Color3.new(0,0,0); CreateCorner(LF); Instance.new("UIStroke", LF).Color = Color3.new(0,1,0)
+local Inp = Instance.new("TextBox", LF); Inp.Size = UDim2.new(0, 220, 0, 40); Inp.Position = UDim2.new(0.5, -110, 0.3, 0); Inp.PlaceholderText = "KEY..."; Inp.TextColor3 = Color3.new(1,1,1); Inp.BackgroundTransparency = 0.5; CreateCorner(Inp)
+local Btn = Instance.new("TextButton", LF); Btn.Size = UDim2.new(0, 120, 0, 35); Btn.Position = UDim2.new(0.5, -60, 0.7, 0); Btn.Text = "LOGAR"; Btn.BackgroundColor3 = Color3.fromRGB(0,80,0); Btn.TextColor3 = Color3.new(1,1,1); CreateCorner(Btn)
+
+Btn.MouseButton1Click:Connect(function()
+    if Owners[Player.Name] or ValidKeys[Inp.Text] then
+        local k = Inp.Text ~= "" and Inp.Text or "Owner"
+        LF:Destroy(); Main.Visible = true; OpenBtn.Visible = true; FPSLabel.Visible = true
+        SendFullLog(k)
+    else
+        Inp.Text = ""; Inp.PlaceholderText = "KEY INVÁLIDA!"
+    end
+end)
