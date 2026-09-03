@@ -1,0 +1,987 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+
+if not LocalPlayer then
+    pcall(function() Players:GetPropertyChangedSignal("LocalPlayer"):Wait() end)
+    LocalPlayer = Players.LocalPlayer
+end
+
+local CONFIG = {EggESP = true, PlotESP = true, ESPBeam = true, StatsPanel = true, Theme = "Dark"}
+
+local COLORS = {
+    Dark = {bg = Color3.fromRGB(12,11,10), rail = Color3.fromRGB(16,15,14), card = Color3.fromRGB(32,30,27), lift = Color3.fromRGB(42,39,35), fill = Color3.fromRGB(48,44,39), line = Color3.fromRGB(58,53,46), text = Color3.fromRGB(246,242,234), dim = Color3.fromRGB(168,158,144), mute = Color3.fromRGB(110,102,92), accent = Color3.fromRGB(214,168,108), ink = Color3.fromRGB(22,18,14), ok = Color3.fromRGB(138,166,128)},
+    Light = {bg = Color3.fromRGB(232,226,218), rail = Color3.fromRGB(232,226,218), card = Color3.fromRGB(252,250,246), lift = Color3.fromRGB(242,236,228), fill = Color3.fromRGB(224,218,208), line = Color3.fromRGB(204,196,184), text = Color3.fromRGB(28,24,20), dim = Color3.fromRGB(92,84,74), mute = Color3.fromRGB(128,120,108), accent = Color3.fromRGB(168,114,56), ink = Color3.fromRGB(252,250,246), ok = Color3.fromRGB(64,118,82)}
+}
+
+local function getColors() return COLORS[CONFIG.Theme] or COLORS.Dark end
+
+local Directory = {}
+local u1103 = nil
+pcall(function() local Assets = require(ReplicatedStorage.Data.Assets) if type(Assets) == "table" then Directory = Assets.Directory or {} end end)
+pcall(function() u1103 = require(ReplicatedStorage.Client.EggState) end)
+
+local function formatNumber(num)
+    local n = tonumber(num) or 0
+    local abs = math.abs(n)
+    if abs >= 1e12 then return string.format("%.2fT", n / 1e12) end
+    if abs >= 1e9 then return string.format("%.2fB", n / 1e9) end
+    if abs >= 1e6 then return string.format("%.2fm", n / 1e6) end
+    if abs >= 1e3 then return string.format("%.1fk", n / 1e3) end
+    return string.format("%.0f", n)
+end
+
+local function getRarityColor(n)
+    n = tonumber(n) or 0
+    if n >= 11 then return Color3.fromRGB(255,236,150) end
+    if n >= 10 then return Color3.fromRGB(255,90,210) end
+    if n >= 9 then return Color3.fromRGB(120,210,255) end
+    if n >= 8 then return Color3.fromRGB(255,80,110) end
+    if n >= 7 then return Color3.fromRGB(255,186,70) end
+    if n >= 6 then return Color3.fromRGB(186,120,255) end
+    if n >= 5 then return Color3.fromRGB(255,220,90) end
+    if n >= 4 then return Color3.fromRGB(160,120,255) end
+    if n >= 3 then return Color3.fromRGB(90,170,255) end
+    if n >= 2 then return Color3.fromRGB(120,200,120) end
+    return Color3.fromRGB(210,210,210)
+end
+
+local function getEggPosition(egg)
+    if not egg then return nil end
+    local pos = egg.BottomCFrame
+    if pos then
+        if typeof(pos) == "Vector3" then return pos + Vector3.new(0,4,0) end
+        if typeof(pos) == "CFrame" then return pos.Position + Vector3.new(0,4,0) end
+    end
+    pos = egg.BoundsCFrame
+    if pos then
+        if typeof(pos) == "Vector3" then return pos end
+        if typeof(pos) == "CFrame" then return pos.Position end
+    end
+    pos = egg.CFrame
+    if pos then
+        if typeof(pos) == "Vector3" then return pos end
+        if typeof(pos) == "CFrame" then return pos.Position end
+    end
+    pos = egg.Position
+    if pos then
+        if typeof(pos) == "Vector3" then return pos + Vector3.new(4,0,4) end
+        if typeof(pos) == "CFrame" then return pos.Position + Vector3.new(4,0,4) end
+    end
+    return nil
+end
+
+local function getEggEarn(egg, cfg)
+    if type(egg) ~= "table" then return 0 end
+    if not cfg and egg then
+        local cat = egg.AssetCategory or egg.Category
+        if Directory and cat then cfg = Directory[cat] end
+    end
+    local num = tonumber(egg.MoneyPerSecond)
+    if num and num > 0 then return num end
+    local baseRate = type(cfg) == "table" and (tonumber(cfg.EarningRate) or 0) or 0
+    local mutations = {}
+    if type(egg.Mutations) == "table" then mutations = egg.Mutations end
+    local scale = tonumber(egg.Scale) or 1
+    if scale <= 0 then scale = 1 end
+    local weight = tonumber(egg.Weight) or tonumber(egg.Kg) or tonumber(egg.ModelWeight) or 0
+    local modelWeight = type(cfg) == "table" and tonumber(cfg.ModelWeight) or 0
+    if weight > 0 and modelWeight > 0 then scale = (weight / modelWeight) ^ (1/3) end
+    local scaledEarn = scale <= 5 and scale ^ 1.85 or (scale / 5) ^ 1.2 * 19.637875755794
+    local mutMult = 1
+    pcall(function()
+        local Mutations = require(ReplicatedStorage.Shared.Modules.Mutations)
+        if Mutations and Mutations.EarningsFor then mutMult = Mutations.EarningsFor(mutations) or 1 end
+    end)
+    local result = baseRate * scaledEarn * mutMult
+    if result < 1 and baseRate > 0 then result = 1
+    return math.floor(result + 0.5)
+end
+
+local ESP = {folder = nil, pool = {}, beamObj = nil, att0 = nil, att1 = nil, tip = nil, statsFrame = nil, statsRows = nil, lastTick = 0, iconBy = {}, plotList = {}, plotAt = 0, world = nil}
+
+function ESP:getFolder()
+    local folder = workspace:FindFirstChild("AsukykEsp")
+    if folder and folder:IsA("Folder") then
+        self.folder = folder
+        return folder
+    end
+    if self.folder and self.folder.Parent == workspace then
+        return self.folder
+    end
+    if self.folder then pcall(function() self.folder:Destroy() end) end
+    folder = Instance.new("Folder")
+    folder.Name = "AsukykEsp"
+    folder.Parent = workspace
+    self.folder = folder
+    return folder
+end
+
+function ESP:getWorldGui()
+    local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+    local world = self.world
+    if not world or not world.Parent then world = PlayerGui:FindFirstChild("AsukykWorldGui") end
+    if world and world:IsA("ScreenGui") then
+        world.Enabled = true
+        world.ResetOnSpawn = false
+        self.world = world
+        return world
+    end
+    world = Instance.new("ScreenGui")
+    world.Name = "AsukykWorldGui"
+    world.ResetOnSpawn = false
+    world.IgnoreGuiInset = true
+    world.DisplayOrder = 80
+    world.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    world.Parent = PlayerGui
+    self.world = world
+    return world
+end
+
+function ESP:createBillboard()
+    local gui = self:getWorldGui()
+    local billboard = Instance.new("BillboardGui")
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.MaxDistance = 1000000
+    billboard.Size = UDim2.fromOffset(152, 34)
+    billboard.StudsOffset = Vector3.new(0, 2.2, 0)
+    billboard.ResetOnSpawn = false
+    billboard.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    billboard.Parent = gui
+    local frame = Instance.new("Frame")
+    frame.BackgroundColor3 = Color3.fromRGB(16,15,14)
+    frame.BackgroundTransparency = 0.34
+    frame.BorderSizePixel = 0
+    frame.Size = UDim2.fromScale(1,1)
+    frame.ClipsDescendants = true
+    frame.ZIndex = 1
+    frame.Parent = billboard
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,8)
+    corner.Parent = frame
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(70,64,56)
+    stroke.Transparency = 0.38
+    stroke.Thickness = 1
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = frame
+    local accent = Instance.new("Frame")
+    accent.BackgroundColor3 = Color3.fromRGB(210,210,210)
+    accent.BorderSizePixel = 0
+    accent.Size = UDim2.new(0,2,1,-8)
+    accent.Position = UDim2.fromOffset(3,4)
+    accent.ZIndex = 2
+    accent.Parent = frame
+    local accentCorner = Instance.new("UICorner")
+    accentCorner.CornerRadius = UDim.new(0,2)
+    accentCorner.Parent = accent
+    local icon = Instance.new("ImageLabel")
+    icon.BackgroundColor3 = Color3.fromRGB(28,26,24)
+    icon.BackgroundTransparency = 1
+    icon.Position = UDim2.fromOffset(8,6)
+    icon.Size = UDim2.fromOffset(22,22)
+    icon.Image = ""
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.Visible = false
+    icon.ZIndex = 2
+    icon.Parent = frame
+    local iconCorner = Instance.new("UICorner")
+    iconCorner.CornerRadius = UDim.new(0,5)
+    iconCorner.Parent = icon
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Position = UDim2.fromOffset(8,2)
+    title.Size = UDim2.new(1,-12,0,14)
+    title.Font = Enum.Font.BuilderSansMedium
+    title.Text = ""
+    title.TextColor3 = Color3.fromRGB(246,242,234)
+    title.TextSize = 11
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.TextTruncate = Enum.TextTruncate.AtEnd
+    title.ZIndex = 2
+    title.Parent = frame
+    local sub = Instance.new("TextLabel")
+    sub.BackgroundTransparency = 1
+    sub.Position = UDim2.fromOffset(8,16)
+    sub.Size = UDim2.new(1,-12,0,14)
+    sub.Font = Enum.Font.RobotoMono
+    sub.Text = ""
+    sub.TextColor3 = Color3.fromRGB(168,158,144)
+    sub.TextSize = 9
+    sub.TextXAlignment = Enum.TextXAlignment.Left
+    sub.TextYAlignment = Enum.TextYAlignment.Top
+    sub.TextTruncate = Enum.TextTruncate.AtEnd
+    sub.ZIndex = 2
+    sub.Parent = frame
+    return {bb = billboard, card = frame, stroke = stroke, accent = accent, icon = icon, title = title, sub = sub, alive = false, dummy = nil, pos = nil}
+end
+
+function ESP:updateBillboard(key, pos, data)
+    if not pos then return end
+    local item = self.pool[key]
+    if item and (not item.bb or not item.bb.Parent) then
+        if item.dummy then pcall(function() item.dummy:Destroy() end) end
+        item = nil
+        self.pool[key] = nil
+    end
+    if not item then
+        item = self:createBillboard()
+        self.pool[key] = item
+    end
+    item.alive = true
+    item.pos = pos
+    local folder = self:getFolder()
+    if not item.dummy or not item.dummy.Parent then
+        if item.dummy then pcall(function() item.dummy:Destroy() end) end
+        local part = Instance.new("Part")
+        part.Name = "AsukykEspAdorn"
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanQuery = false
+        part.CanTouch = false
+        part.CastShadow = false
+        part.Transparency = 1
+        part.Size = Vector3.new(0.15,0.15,0.15)
+        part.Parent = folder
+        item.dummy = part
+    end
+    pcall(function() item.dummy.CFrame = CFrame.new(pos) end)
+    item.bb.Adornee = item.dummy
+    item.bb.Parent = self:getWorldGui()
+    item.bb.Enabled = true
+    local color = data.color or Color3.fromRGB(210,210,210)
+    item.title.Text = tostring(data.name or "")
+    item.sub.Text = tostring(data.sub or "")
+    item.accent.BackgroundColor3 = color
+    local tall = data.tall == true
+    local height = tall and 46 or 34
+    local icon = data.icon
+    local width = icon and 180 or 152
+    if item.icon then
+        if icon then
+            item.icon.Image = icon
+            item.icon.Visible = true
+            local name = tostring(data.name or ""):gsub("^▸%s*",""):gsub("^>%s*","")
+            if name ~= "" and icon then
+                local key = string.lower(name)
+                self.iconBy[key] = icon
+                local clean = key:gsub("[%s_%-]+","")
+                if clean ~= key then self.iconBy[clean] = icon end
+            end
+            item.title.Position = UDim2.fromOffset(34,2)
+            item.title.Size = UDim2.new(1,-40,0,14)
+            item.sub.Position = UDim2.fromOffset(34,16)
+            item.sub.Size = UDim2.new(1,-40,0,tall and 26 or 14)
+            item.sub.TextWrapped = tall
+        else
+            item.icon.Image = ""
+            item.icon.Visible = false
+            item.title.Position = UDim2.fromOffset(8,2)
+            item.title.Size = UDim2.new(1,-12,0,14)
+            item.sub.Position = UDim2.fromOffset(8,16)
+            item.sub.Size = UDim2.new(1,-12,0,tall and 26 or 14)
+            item.sub.TextWrapped = tall
+        end
+    end
+    local isLight = CONFIG.Theme == "Light"
+    local isTarget = data.target == true
+    if isLight then
+        item.card.BackgroundColor3 = Color3.fromRGB(252,250,246)
+        item.card.BackgroundTransparency = 0.28
+        item.title.TextColor3 = Color3.fromRGB(28,24,20)
+        item.sub.TextColor3 = Color3.fromRGB(92,84,74)
+        item.stroke.Color = isTarget and Color3.fromRGB(214,168,108) or Color3.fromRGB(188,178,164)
+        item.stroke.Transparency = not isTarget and 0.32 or 0.12
+        if item.icon then
+            item.icon.BackgroundColor3 = Color3.fromRGB(232,226,216)
+            item.icon.BackgroundTransparency = not item.icon.Visible and 1 or 0.42
+        end
+    else
+        item.card.BackgroundColor3 = Color3.fromRGB(16,15,14)
+        item.card.BackgroundTransparency = 0.34
+        item.title.TextColor3 = Color3.fromRGB(246,242,234)
+        item.sub.TextColor3 = Color3.fromRGB(168,158,144)
+        item.stroke.Color = isTarget and Color3.fromRGB(214,168,108) or Color3.fromRGB(58,53,46)
+        item.stroke.Transparency = not isTarget and 0.38 or 0.08
+        if item.icon then
+            item.icon.BackgroundColor3 = Color3.fromRGB(28,26,24)
+            item.icon.BackgroundTransparency = not item.icon.Visible and 1 or 0.5
+        end
+    end
+    item.stroke.Thickness = not isLight and 1 or 1.5
+    item.bb.Size = UDim2.fromOffset(width, height)
+end
+
+function ESP:cleanPool()
+    for key, item in pairs(self.pool) do
+        if not item.alive then
+            if item.bb then item.bb:Destroy() end
+            if item.dummy then pcall(function() item.dummy:Destroy() end) end
+            self.pool[key] = nil
+        else
+            item.alive = false
+        end
+    end
+end
+
+function ESP:getEggDisplay(egg, cfg, isTarget)
+    local name = cfg and (cfg.DisplayName or (type(cfg.Egg) == "table" and cfg.Egg.DisplayName)) or tostring(egg.AssetCategory or "?")
+    if isTarget then name = "▸ " .. tostring(name) end
+    local earn = formatNumber(getEggEarn(egg, cfg)) .. "/s"
+    local rarity = type(cfg) == "table" and type(cfg.Rarity) == "table" and tostring(cfg.Rarity.DisplayName or cfg.Rarity.Name or cfg.Rarity._id or "?") or "?"
+    local weight = ""
+    local w = 0
+    if type(egg) == "table" then w = tonumber(egg.Weight) or tonumber(egg.ModelWeight) or tonumber(egg.Kg) or 0 end
+    if w <= 0 and type(cfg) == "table" then w = tonumber(cfg.Weight) or tonumber(cfg.ModelWeight) or 0 end
+    if w > 0 then weight = w >= 100 and string.format("%.0fkg", w) or string.format("%.1fkg", w) end
+    local chance = ""
+    if type(cfg) == "table" and type(cfg.Rarity) == "table" then
+        local val = cfg.Rarity.DefaultRarityValue
+        if type(val) == "string" and val ~= "" then
+            local cleaned = string.gsub(val, ",", "")
+            cleaned = string.gsub(cleaned, "1 in ", "1/")
+            cleaned = string.gsub(cleaned, " ", "")
+            if string.sub(cleaned, 1, 2) == "1/" then
+                local num = tonumber(string.sub(cleaned, 3))
+                if num then
+                    if num >= 1e12 then chance = string.format("1/%.2ft", num / 1e12)
+                    elseif num >= 1e9 then chance = string.format("1/%.2fb", num / 1e9)
+                    elseif num >= 1e6 then chance = string.format("1/%.2fm", num / 1e6)
+                    elseif num >= 1e3 then chance = string.format("1/%.0fk", num / 1e3)
+                    else chance = cleaned end
+                end
+            end
+        end
+    end
+    local parts = {earn, rarity}
+    if chance ~= "" then table.insert(parts, chance) end
+    if weight ~= "" then table.insert(parts, weight) end
+    local mutations = ""
+    if type(egg) == "table" and type(egg.Mutations) == "table" and #egg.Mutations > 0 then mutations = table.concat(egg.Mutations, " · ") end
+    local sub = table.concat(parts, " · ")
+    if mutations ~= "" then sub = sub .. "\n" .. mutations end
+    local rarityNum = type(cfg) == "table" and type(cfg.Rarity) == "table" and tonumber(cfg.Rarity.RarityNumber) or 0
+    local color = getRarityColor(rarityNum)
+    local icon = nil
+    local cat = egg and egg.AssetCategory
+    if cat and cfg then
+        local keys = {}
+        local function addKey(k) if type(k) == "string" and k ~= "" then local lk = string.lower(k) table.insert(keys, lk) table.insert(keys, lk:gsub("[%s_%-]+","")) end end
+        addKey(cat)
+        addKey(cfg.DisplayName)
+        addKey(cfg._id)
+        if type(cfg.Egg) == "table" then addKey(cfg.Egg.DisplayName) end
+        for _, k in ipairs(keys) do
+            local ic = self.iconBy[k]
+            if ic then icon = ic break end
+        end
+    end
+    return {name = name, sub = sub, color = color, target = isTarget, tall = mutations ~= "", icon = icon}
+end
+
+function ESP:readFieldEggs()
+    if not u1103 then return {} end
+    local readFunc = u1103.ReadFieldEggs or u1103.SyncFieldEggs
+    if type(readFunc) ~= "function" then return {} end
+    local ok, result = pcall(readFunc)
+    if not ok or type(result) ~= "table" or type(result.Records) ~= "table" then return {} end
+    local eggs = {}
+    local seen = {}
+    for _, v in pairs(result.Records) do
+        if type(v) == "table" and v.Uid and not seen[v.Uid] then
+            seen[v.Uid] = true
+            table.insert(eggs, v)
+        end
+    end
+    return eggs
+end
+
+function ESP:isPlotEgg(egg)
+    if not egg then return false end
+    if egg.Placement ~= nil then return true end
+    if egg.OwnerUserId and egg.State ~= "Dropped" then return true end
+    local uid = string.lower(tostring(egg.Uid or ""))
+    if uid:find("plot", 1, true) or uid:find(":pen", 1, true) or uid:find("hatch", 1, true) then return true end
+    return false
+end
+
+function ESP:readPlayerEggs()
+    if not u1103 then return nil end
+    if type(u1103.ReadOwnerEggs) == "function" then
+        local ok, result = pcall(u1103.ReadOwnerEggs, LocalPlayer.UserId)
+        if ok and type(result) == "table" then return result end
+    end
+    if type(u1103.ReadOwnedEggs) == "function" then
+        local ok, result = pcall(u1103.ReadOwnedEggs)
+        if ok and type(result) == "table" then
+            for _, v in pairs(result) do
+                if type(v) == "table" and tonumber(v.OwnerUserId) == LocalPlayer.UserId then
+                    return v.Records
+                end
+            end
+        end
+    end
+    return nil
+end
+
+function ESP:getPlot()
+    local plot = nil
+    pcall(function() plot = require(ReplicatedStorage.Client.PlotState).ResolvePlot() end)
+    if type(plot) == "table" and plot.PlotFolder then return plot.PlotFolder, plot.CenterPoint end
+    local Plots = workspace:FindFirstChild("Plots")
+    if not Plots then return end
+    for _, child in ipairs(Plots:GetChildren()) do
+        local found = false
+        for _, desc in ipairs(child:GetDescendants()) do
+            if desc:IsA("TextLabel") and string.find(desc.Text, LocalPlayer.Name, 1, true) then
+                found = true
+                break
+            end
+        end
+        if found then
+            local center = child:FindFirstChild("CenterPoint", true)
+            return child, center
+        end
+    end
+    return nil, nil
+end
+
+function ESP:isEggReady(egg, uid)
+    uid = uid or egg.Uid
+    if uid and u1103 and type(u1103.IsReadyToHatch) == "function" then
+        local ok, result = pcall(u1103.IsReadyToHatch, uid)
+        if ok and result then return 0, true end
+    end
+    if egg.IsReady == true or egg.Ready == true then return 0, true end
+    local endsAt = egg.HatchEndsAt or egg.ReadyAt or egg.GrowEndsAt
+    if type(endsAt) == "number" then
+        local left = endsAt - workspace.DistributedGameTime
+        return left, left <= 0
+    end
+    local left = tonumber(egg.TimeLeft) or tonumber(egg.HatchTimeLeft)
+    if left then return left, left <= 0 end
+    return nil, false
+end
+
+function ESP:formatTime(seconds)
+    local s = math.max(0, math.floor(tonumber(seconds) or 0))
+    local h = math.floor(s / 3600)
+    local m = math.floor(s % 3600 / 60)
+    local sec = s % 60
+    if h > 0 then return string.format("%d:%02d:%02d", h, m, sec) end
+    return string.format("%d:%02d", m, sec)
+end
+
+function ESP:readPlotEggs()
+    local elapsed = os.clock()
+    if elapsed - (self.plotAt or 0) < 0.5 then return self.plotList end
+    self.plotAt = elapsed
+    local list = {}
+    local eggs = self:readPlayerEggs()
+    local plotFolder, centerPoint = self:getPlot()
+    local cframe = CFrame.new()
+    if centerPoint and centerPoint:IsA("BasePart") then cframe = centerPoint.CFrame
+    elseif plotFolder then pcall(function() cframe = plotFolder:GetPivot() end) end
+    if type(eggs) == "table" then
+        for k, v in pairs(eggs) do
+            if type(v) == "table" and v.AssetCategory then
+                local uid = v.Uid or k
+                local cat = v.AssetCategory
+                local cfg = Directory and Directory[cat]
+                local pos = nil
+                local placement = v.Placement
+                if type(placement) == "table" and placement.LocalCFrame then
+                    local ok, result = pcall(function() return cframe * placement.LocalCFrame end)
+                    if ok and result then pos = result.Position + Vector3.new(0,3,0) end
+                end
+                if pos then
+                    local left, ready = self:isEggReady(v, uid)
+                    table.insert(list, {key = "p:" .. tostring(uid), pos = pos, cfg = cfg, rec = v, left = left, ready = ready})
+                end
+            end
+        end
+    end
+    self.plotList = list
+    return list
+end
+
+function ESP:updateBeam(from, to)
+    if not from or not to then
+        if self.beamObj then self.beamObj.Enabled = false end
+        return
+    end
+    local folder = self:getFolder()
+    if not folder then
+        if self.beamObj then self.beamObj.Enabled = false end
+        return
+    end
+    if not self.att0 or from ~= self.att0.Parent then
+        if self.att0 then pcall(function() self.att0:Destroy() end) end
+        local att = Instance.new("Attachment")
+        att.Name = "AsukykBeamA"
+        att.Parent = from
+        self.att0 = att
+    end
+    if not self.tip or not self.tip.Parent then
+        local part = Instance.new("Part")
+        part.Name = "AsukykBeamTip"
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanQuery = false
+        part.CanTouch = false
+        part.Transparency = 1
+        part.Size = Vector3.new(0.2,0.2,0.2)
+        part.Parent = folder
+        self.tip = part
+    end
+    pcall(function() self.tip.CFrame = CFrame.new(to) end)
+    if not self.att1 or self.att1.Parent ~= self.tip then
+        if self.att1 then pcall(function() self.att1:Destroy() end) end
+        local att = Instance.new("Attachment")
+        att.Name = "AsukykBeamB"
+        att.Parent = self.tip
+        self.att1 = att
+    end
+    if not self.beamObj or not self.beamObj.Parent then
+        local beam = Instance.new("Beam")
+        beam.Name = "AsukykBeam"
+        beam.FaceCamera = true
+        beam.Width0 = 0.16
+        beam.Width1 = 0.05
+        beam.LightEmission = 0.7
+        beam.Transparency = NumberSequence.new(0.15)
+        beam.Parent = folder
+        self.beamObj = beam
+    end
+    self.beamObj.Attachment0 = self.att0
+    self.beamObj.Attachment1 = self.att1
+    self.beamObj.Color = ColorSequence.new(Color3.fromRGB(214,168,108))
+    self.beamObj.Enabled = true
+end
+
+function ESP:tick()
+    if not (CONFIG.EggESP or CONFIG.PlotESP or CONFIG.ESPBeam) then return end
+    local elapsed = os.clock()
+    if elapsed - (self.lastTick or 0) < 0.08 then return end
+    self.lastTick = elapsed
+    if CONFIG.EggESP then
+        local eggs = self:readFieldEggs()
+        for _, egg in ipairs(eggs) do
+            if type(egg) ~= "table" or not egg.Uid then continue end
+            local state = egg.State
+            if state ~= "Slot" and state ~= "Dropped" then continue end
+            if self:isPlotEgg(egg) then continue end
+            local cat = egg.AssetCategory
+            local cfg = Directory and Directory[cat]
+            local pos = getEggPosition(egg)
+            if not pos then
+                local poolItem = self.pool["f:" .. egg.Uid]
+                pos = poolItem and poolItem.pos
+            end
+            if pos then
+                local data = self:getEggDisplay(egg, cfg, false)
+                self:updateBillboard("f:" .. egg.Uid, pos, data)
+            end
+        end
+    end
+    if CONFIG.PlotESP then
+        for _, egg in ipairs(self:readPlotEggs()) do
+            local cfg = egg.cfg
+            local earn = formatNumber(getEggEarn(egg.rec, cfg)) .. "/s"
+            local name = cfg and (cfg.DisplayName or (egg.rec and egg.rec.AssetCategory)) or "plot egg"
+            local status = egg.ready and "ready" or (egg.left and self:formatTime(egg.left) or "hatching")
+            local sub = earn .. "  ·  " .. status
+            local data = {name = tostring(name), sub = sub, color = egg.ready and Color3.fromRGB(138,166,128) or Color3.fromRGB(168,158,144), target = egg.ready == true}
+            local cat = egg.rec and egg.rec.AssetCategory
+            if cat and cfg then
+                local keys = {}
+                local function addKey(k) if type(k) == "string" and k ~= "" then local lk = string.lower(k) table.insert(keys, lk) table.insert(keys, lk:gsub("[%s_%-]+","")) end end
+                addKey(cat)
+                addKey(cfg.DisplayName)
+                addKey(cfg._id)
+                if type(cfg.Egg) == "table" then addKey(cfg.Egg.DisplayName) end
+                for _, k in ipairs(keys) do
+                    local ic = self.iconBy[k]
+                    if ic then data.icon = ic break end
+                end
+            end
+            self:updateBillboard(egg.key, egg.pos, data)
+        end
+    end
+    if CONFIG.ESPBeam and _G.t216 and _G.t216.running and _G.t216.target and _G.t216.target.pos then
+        local char = LocalPlayer.Character
+        if char then
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if root then self:updateBeam(root, _G.t216.target.pos) end
+        end
+    elseif self.beamObj then
+        self.beamObj.Enabled = false
+    end
+    self:cleanPool()
+end
+
+function ESP:createStatsPanel()
+    if self.statsFrame and self.statsFrame.Parent then return self.statsFrame end
+    local parent = game:GetService("CoreGui")
+    local C = getColors()
+    local panel = parent:FindFirstChild("StatsPanel")
+    if panel then pcall(function() panel:Destroy() end) end
+    local frame = Instance.new("Frame")
+    frame.Name = "StatsPanel"
+    frame.BackgroundColor3 = C.card
+    frame.BorderSizePixel = 0
+    frame.Position = UDim2.fromOffset(16,72)
+    frame.Size = UDim2.fromOffset(248,222)
+    frame.ZIndex = 40
+    frame.Active = true
+    frame.Visible = true
+    frame.ClipsDescendants = false
+    frame.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0,10)
+    corner.Parent = frame
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = C.line
+    stroke.Thickness = 1
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = frame
+    local header = Instance.new("TextLabel")
+    header.BackgroundColor3 = C.rail
+    header.BorderSizePixel = 0
+    header.Size = UDim2.new(1,0,0,26)
+    header.Font = Enum.Font.BuilderSansMedium
+    header.Text = "  Stats"
+    header.TextColor3 = C.text
+    header.TextSize = 12
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.ZIndex = 9
+    header.Active = true
+    header.Parent = frame
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0,10)
+    headerCorner.Parent = header
+    local headerBottom = Instance.new("Frame")
+    headerBottom.BackgroundColor3 = C.rail
+    headerBottom.BorderSizePixel = 0
+    headerBottom.Position = UDim2.new(0,0,0,16)
+    headerBottom.Size = UDim2.new(1,0,0,10)
+    headerBottom.ZIndex = 9
+    headerBottom.Parent = header
+    local rows = {}
+    local y = 28
+    local fields = {"Money", "Income", "Pen", "Best pet", "Best egg", "Speed", "Session"}
+    for _, field in ipairs(fields) do
+        local isBest = field == "Best pet" or field == "Best egg"
+        local height = isBest and 34 or 18
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.Position = UDim2.fromOffset(10,y)
+        label.Size = UDim2.fromOffset(72,height)
+        label.Font = Enum.Font.BuilderSans
+        label.Text = field
+        label.TextColor3 = C.dim
+        label.TextSize = 11
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.TextYAlignment = Enum.TextYAlignment.Top
+        label.ZIndex = 9
+        label.Parent = frame
+        local value = Instance.new("TextLabel")
+        value.BackgroundTransparency = 1
+        value.Position = UDim2.fromOffset(82,y)
+        value.Size = UDim2.fromOffset(156,height)
+        value.Font = Enum.Font.RobotoMono
+        value.Text = "—"
+        value.TextColor3 = C.text
+        value.TextSize = 11
+        value.TextXAlignment = Enum.TextXAlignment.Right
+        value.TextYAlignment = Enum.TextYAlignment.Top
+        value.TextWrapped = isBest
+        value.TextTruncate = isBest and Enum.TextTruncate.None or Enum.TextTruncate.AtEnd
+        value.ZIndex = 9
+        value.Parent = frame
+        rows[field] = value
+        y = y + (isBest and 38 or 21)
+    end
+    frame.Size = UDim2.fromOffset(248, y + 8)
+    self.statsFrame = frame
+    self.statsRows = rows
+    local dragging = false
+    local dragStart = nil
+    local dragPos = nil
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            dragPos = frame.Position
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
+        if not frame or not frame.Parent then dragging = false return end
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(dragPos.X.Scale, dragPos.X.Offset + delta.X, dragPos.Y.Scale, dragPos.Y.Offset + delta.Y)
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then dragging = false end
+    end)
+    return frame
+end
+
+function ESP:updateStats()
+    if not CONFIG.StatsPanel then
+        if self.statsFrame then self.statsFrame.Visible = false end
+        return
+    end
+    local elapsed = os.clock()
+    if elapsed - (self.statsAt or 0) < 0.35 then return end
+    self.statsAt = elapsed
+    local frame = self:createStatsPanel()
+    if not frame then return end
+    frame.Visible = true
+    local rows = self.statsRows
+    if not rows then return end
+    local sessionTime = math.max(0, math.floor(elapsed - self.sessionAt))
+    local h = math.floor(sessionTime / 3600)
+    local m = math.floor(sessionTime % 3600 / 60)
+    local s = sessionTime % 60
+    local sessionStr = (h > 0 and string.format("%d:%02d:%02d", h, m, s) or string.format("%d:%02d", m, s))
+    if rows.Session and rows.Session.Parent then rows.Session.Text = sessionStr end
+    pcall(function()
+        local money = "—"
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        if leaderstats then
+            local cash = leaderstats:FindFirstChild("Money") or leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Coins")
+            if cash and cash:IsA("ValueBase") then money = "$" .. formatNumber(cash.Value) end
+        end
+        if rows.Money and rows.Money.Parent then rows.Money.Text = money end
+    end)
+    pcall(function()
+        local income = "—"
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        if leaderstats then
+            local inc = leaderstats:FindFirstChild("Money/s") or leaderstats:FindFirstChild("Income")
+            if inc and inc:IsA("ValueBase") then income = formatNumber(inc.Value) .. "/s" end
+        end
+        if rows.Income and rows.Income.Parent then rows.Income.Text = income end
+    end)
+    pcall(function()
+        local speed = "—"
+        local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+        if leaderstats then
+            local spd = leaderstats:FindFirstChild("Speed")
+            if spd and spd:IsA("ValueBase") then speed = formatNumber(spd.Value) end
+        end
+        if rows.Speed and rows.Speed.Parent then rows.Speed.Text = speed end
+    end)
+    pcall(function()
+        local placed = 0
+        local eggs = self:readPlayerEggs()
+        if type(eggs) == "table" then
+            for _, v in pairs(eggs) do
+                if type(v) == "table" and v.Placement then placed = placed + 1 end
+            end
+        end
+        if rows.Pen and rows.Pen.Parent then rows.Pen.Text = tostring(placed) .. " placed" end
+    end)
+    pcall(function()
+        local best = "—"
+        local bestEarn = 0
+        local eggs = self:readPlayerEggs()
+        if type(eggs) == "table" then
+            for _, v in pairs(eggs) do
+                if type(v) == "table" then
+                    local cat = v.AssetCategory
+                    local cfg = Directory and Directory[cat]
+                    local earn = getEggEarn(v, cfg)
+                    if earn > bestEarn then
+                        bestEarn = earn
+                        best = cfg and (cfg.DisplayName or type(cfg.Egg) == "table" and cfg.Egg.DisplayName) or cat or "?"
+                    end
+                end
+            end
+        end
+        if best ~= "—" then best = best .. "\n" .. formatNumber(bestEarn) .. "/s" end
+        if rows["Best pet"] and rows["Best pet"].Parent then rows["Best pet"].Text = best end
+    end)
+    pcall(function()
+        local best = "—"
+        local bestEarn = 0
+        local eggs = self:readFieldEggs()
+        if type(eggs) == "table" then
+            for _, v in ipairs(eggs) do
+                if type(v) == "table" and (v.State == "Slot" or v.State == "Dropped") and not self:isPlotEgg(v) then
+                    local cat = v.AssetCategory
+                    local cfg = Directory and Directory[cat]
+                    local earn = getEggEarn(v, cfg)
+                    if earn > bestEarn then
+                        bestEarn = earn
+                        best = cfg and (cfg.DisplayName or type(cfg.Egg) == "table" and cfg.Egg.DisplayName) or cat or "?"
+                    end
+                end
+            end
+        end
+        if best ~= "—" then best = best .. "\n" .. formatNumber(bestEarn) .. "/s" end
+        if rows["Best egg"] and rows["Best egg"].Parent then rows["Best egg"].Text = best end
+    end)
+end
+
+function createControlUI()
+    local parent = game:GetService("CoreGui")
+    local button = Instance.new("TextButton")
+    button.Name = "ESPToggle"
+    button.Size = UDim2.fromOffset(50, 50)
+    button.Position = UDim2.new(0.02, 0, 0.5, -25)
+    button.BackgroundColor3 = Color3.fromRGB(20,20,25)
+    button.BackgroundTransparency = 0.15
+    button.Text = ""
+    button.ZIndex = 100
+    button.AutoButtonColor = false
+    button.Parent = parent
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(1,0)
+    corner.Parent = button
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(214,168,108)
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.3
+    stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    stroke.Parent = button
+    local icon = Instance.new("TextLabel")
+    icon.Size = UDim2.fromScale(1,1)
+    icon.BackgroundTransparency = 1
+    icon.Font = Enum.Font.SourceSansBold
+    icon.Text = "👁"
+    icon.TextSize = 24
+    icon.TextColor3 = Color3.fromRGB(214,168,108)
+    icon.ZIndex = 101
+    icon.Parent = button
+    button.MouseEnter:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {BackgroundTransparency = 0}):Play()
+    end)
+    button.MouseLeave:Connect(function()
+        TweenService:Create(button, TweenInfo.new(0.2), {BackgroundTransparency = 0.15}):Play()
+    end)
+    local menu = Instance.new("Frame")
+    menu.Size = UDim2.fromOffset(200,180)
+    menu.Position = UDim2.new(0,60,0.5,-90)
+    menu.BackgroundColor3 = Color3.fromRGB(20,20,25)
+    menu.BackgroundTransparency = 0.05
+    menu.BorderSizePixel = 0
+    menu.ZIndex = 99
+    menu.Visible = false
+    menu.Parent = parent
+    local menuCorner = Instance.new("UICorner")
+    menuCorner.CornerRadius = UDim.new(0,12)
+    menuCorner.Parent = menu
+    local menuStroke = Instance.new("UIStroke")
+    menuStroke.Color = Color3.fromRGB(58,53,46)
+    menuStroke.Thickness = 1
+    menuStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    menuStroke.Parent = menu
+    local menuLabel = Instance.new("TextLabel")
+    menuLabel.Size = UDim2.new(1,0,0,30)
+    menuLabel.BackgroundTransparency = 1
+    menuLabel.Font = Enum.Font.BuilderSansBold
+    menuLabel.Text = "🎯 CONTROLE ESP"
+    menuLabel.TextColor3 = Color3.fromRGB(246,242,234)
+    menuLabel.TextSize = 14
+    menuLabel.ZIndex = 100
+    menuLabel.Parent = menu
+    local menuDiv = Instance.new("Frame")
+    menuDiv.Size = UDim2.new(1,-20,0,1)
+    menuDiv.Position = UDim2.fromOffset(10,30)
+    menuDiv.BackgroundColor3 = Color3.fromRGB(58,53,46)
+    menuDiv.BorderSizePixel = 0
+    menuDiv.ZIndex = 100
+    menuDiv.Parent = menu
+    local toggles = {{label = "EggESP", key = "EggESP"}, {label = "PlotESP", key = "PlotESP"}, {label = "ESPBeam", key = "ESPBeam"}, {label = "StatsPanel", key = "StatsPanel"}}
+    local toggleRows = {}
+    local y = 40
+    for _, t in ipairs(toggles) do
+        local row = Instance.new("Frame")
+        row.Size = UDim2.new(1,0,0,30)
+        row.Position = UDim2.fromOffset(0,y)
+        row.BackgroundTransparency = 1
+        row.ZIndex = 100
+        row.Parent = menu
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.7,0,1,0)
+        label.BackgroundTransparency = 1
+        label.Font = Enum.Font.BuilderSans
+        label.Text = t.label
+        label.TextColor3 = Color3.fromRGB(168,158,144)
+        label.TextSize = 12
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.ZIndex = 101
+        label.Parent = row
+        local toggle = Instance.new("TextButton")
+        toggle.Size = UDim2.fromOffset(40,22)
+        toggle.Position = UDim2.new(1,-45,0.5,-11)
+        toggle.BackgroundColor3 = CONFIG[t.key] and Color3.fromRGB(0,200,100) or Color3.fromRGB(60,60,60)
+        toggle.BorderSizePixel = 0
+        toggle.Text = ""
+        toggle.ZIndex = 101
+        toggle.Parent = row
+        local toggleCorner = Instance.new("UICorner")
+        toggleCorner.CornerRadius = UDim.new(0,11)
+        toggleCorner.Parent = toggle
+        local toggleDot = Instance.new("Frame")
+        toggleDot.Size = UDim2.fromOffset(16,16)
+        toggleDot.Position = CONFIG[t.key] and UDim2.new(1,-20,0.5,-8) or UDim2.fromOffset(4,3)
+        toggleDot.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        toggleDot.BorderSizePixel = 0
+        toggleDot.ZIndex = 102
+        toggleDot.Parent = toggle
+        local toggleDotCorner = Instance.new("UICorner")
+        toggleDotCorner.CornerRadius = UDim.new(1,0)
+        toggleDotCorner.Parent = toggleDot
+        toggle.MouseButton1Click:Connect(function()
+            CONFIG[t.key] = not CONFIG[t.key]
+            toggle.BackgroundColor3 = CONFIG[t.key] and Color3.fromRGB(0,200,100) or Color3.fromRGB(60,60,60)
+            TweenService:Create(toggleDot, TweenInfo.new(0.15), {Position = CONFIG[t.key] and UDim2.new(1,-20,0.5,-8) or UDim2.fromOffset(4,3)}):Play()
+        end)
+        toggleRows[t.key] = toggle
+        y = y + 32
+    end
+    menu.Size = UDim2.fromOffset(200, y + 10)
+    button.MouseButton1Click:Connect(function() menu.Visible = not menu.Visible end)
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local pos = input.Position
+            local abs = button.AbsolutePosition
+            local size = button.AbsoluteSize
+            local menuAbs = menu.AbsolutePosition
+            local menuSize = menu.AbsoluteSize
+            if not (pos.X >= abs.X and pos.X <= abs.X + size.X and pos.Y >= abs.Y and pos.Y <= abs.Y + size.Y) and
+               not (pos.X >= menuAbs.X and pos.X <= menuAbs.X + menuSize.X and pos.Y >= menuAbs.Y and pos.Y <= menuAbs.Y + menuSize.Y) then
+                menu.Visible = false
+            end
+        end
+    end)
+    return button, menu
+end
+
+_G.t216 = _G.t216 or {}
+_G.t216.running = false
+_G.t216.target = nil
+
+local statsFrame = ESP:createStatsPanel()
+if statsFrame then statsFrame.Visible = true end
+
+local btn, menu = createControlUI()
+
+local conn1 = RunService.Stepped:Connect(function()
+    pcall(function() ESP:tick() end)
+end)
+
+local conn2 = RunService.RenderStepped:Connect(function()
+    pcall(function() ESP:updateStats() end)
+end)
+
+print("ESP + Interface de Controle carregado!")
+print("Clique no olho 👁 no canto esquerdo para abrir o menu")
